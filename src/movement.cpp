@@ -70,6 +70,7 @@ Movement::Movement(Display *display)
     moving = false;
     homed = false;
     startedHoming = false;
+    motorsEnabled = true; // drivers are enabled above, so the brake is on from boot
 };
 
 void Movement::setTopDistance(const int distance) {
@@ -106,6 +107,7 @@ void Movement::setOrigin()
 
 void Movement::leftStepper(const int dir)
 {
+    if (dir != 0) ensureMotorsEnabled();
     if (dir > 0)
     {
         leftMotor->move(INFINITE_STEPS);
@@ -127,6 +129,7 @@ void Movement::leftStepper(const int dir)
 
 void Movement::rightStepper(const int dir)
 {
+    if (dir != 0) ensureMotorsEnabled();
     if (dir > 0)
     {
         rightMotor->move(INFINITE_STEPS);
@@ -390,6 +393,8 @@ float Movement::beginLinearTravel(double x, double y, int speed)
         throw std::invalid_argument("not ready");
     }
 
+    ensureMotorsEnabled();
+
     if (x < 0 || (x - 1) > width)
     {
         Serial.println("Invalid x");
@@ -458,6 +463,7 @@ Movement::Point Movement::getCoordinates() {
 }
 
 void Movement::extendBelts(int distanceMm) {
+    ensureMotorsEnabled();
     const int steps = int((distanceMm / circumference) * stepsPerRotation);
 
     leftMotor->move(steps);
@@ -472,6 +478,36 @@ void Movement::extendBelts(int distanceMm) {
 void Movement::disableMotors() {
     leftMotor->disableOutputs();
     rightMotor->disableOutputs();
+}
+
+void Movement::setMotorsEnabled(bool enabled) {
+    if (!enabled) {
+        // Never let go of a motor that is still turning
+        leftStepper(0);
+        rightStepper(0);
+        leftMotor->setCurrentPosition(leftMotor->currentPosition());
+        rightMotor->setCurrentPosition(rightMotor->currentPosition());
+        moving = false;
+    }
+
+    // Active low, shared by both drivers
+#ifdef STEPPERS_VIA_SHIFT_REGISTER
+    ShiftRegister::setBit(MOTOR_ENABLE_BIT, enabled ? LOW : HIGH);
+#else
+    digitalWrite(MOTOR_ENABLE_PIN, enabled ? LOW : HIGH);
+#endif
+    motorsEnabled = enabled;
+    Serial.printf("Motor brake %s\n", enabled ? "engaged" : "released");
+}
+
+bool Movement::areMotorsEnabled() {
+    return motorsEnabled;
+}
+
+void Movement::ensureMotorsEnabled() {
+    if (!motorsEnabled) {
+        setMotorsEnabled(true);
+    }
 }
 
 bool Movement::isMoving() {
